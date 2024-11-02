@@ -1,0 +1,9 @@
+{
+    "preferred_name": "Bryan",
+    "ws_ip": "localhost",
+    "ws_port": "3001",
+    "push_to_talk_key": "f5",
+    "audio_device": "Microphone (2- BEACN Mic) (MME)",
+    "ws_enabled": false,
+    "recording_mode": "push"
+}
