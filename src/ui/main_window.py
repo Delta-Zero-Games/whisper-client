@@ -32,11 +32,15 @@ class MainWindow(ctk.CTk):
         # Get default fg_color for frames (darker background)
         self.default_fg_color = ctk.CTkFrame(master=None).cget("fg_color")
 
+        # Set up WebSocket client
+        self.ws_client = WebSocketClient()
+        self.ws_client.set_message_handler(self.on_server_message)
+        self.ws_client.set_status_handler(self.update_ws_status)
+
         # Initialize audio components
         self.capture = AudioCapture()
         self.processor = AudioProcessor()
         self.hotkey_manager = HotkeyManager(self.processor, self.capture)
-        self.ws_client = WebSocketClient()
 
         # Set initial hotkey
         self.hotkey_manager.push_to_talk_key = self.config.get('push_to_talk_key', 'alt')
@@ -65,7 +69,6 @@ class MainWindow(ctk.CTk):
         # Setup callbacks
         self.hotkey_manager.set_transcription_callback(self.on_transcription)
         self.hotkey_manager.set_action_callback(self.on_action)
-        self.ws_client.set_message_handler(self.on_server_message)
 
         # Assign callbacks for recording status updates
         self.capture.on_recording_start = self.on_recording_start
@@ -102,15 +105,15 @@ class MainWindow(ctk.CTk):
         ]
 
         self.metric_labels = {}
-        
+
         for i, (label_text, key) in enumerate(metrics):
             frame = ctk.CTkFrame(status_bar, fg_color="transparent")
             frame.grid(row=0, column=i, padx=5, sticky="ew")
-            
+
             ctk.CTkLabel(frame, text=label_text).pack(side="left", padx=2)
             count_label = ctk.CTkLabel(frame, text="0")
             count_label.pack(side="left", padx=2)
-            
+
             self.metric_labels[key] = count_label
 
     def update_metrics(self, metrics: dict):
@@ -123,14 +126,19 @@ class MainWindow(ctk.CTk):
                 'new_subs_count': 0,
                 'new_giver_count': 0
             }
-        
+
         # Update each metric, defaulting to 0 if not provided
         for key in self.metric_labels:
             value = metrics.get(key, 0)
             self.metric_labels[key].configure(text=str(value))
 
+    def update_ws_status(self, connected: bool):
+        """Update the WebSocket status indicator in the UI."""
+        color = "green" if connected else "red"
+        self.after(0, self.update_status_indicator, self.ws_status, color)
+
     def toggle_websocket(self):
-        """Toggle WebSocket connection"""
+        """Toggle WebSocket connection."""
         if self.ws_toggle.get():
             # Enable WebSocket
             self.ip_entry.configure(state="normal")
@@ -141,8 +149,8 @@ class MainWindow(ctk.CTk):
             asyncio.run_coroutine_threadsafe(self.ws_client.disconnect(), self.loop)
             self.ip_entry.configure(state="disabled")
             self.port_entry.configure(state="disabled")
-            # Update the status indicator and reset metrics
-            self.ws_status.configure(text_color="red")
+            # Update the status indicator and reset metrics in a thread-safe manner
+            self.loop.call_soon_threadsafe(self.update_ws_status, False)
             self.update_metrics({})  # Reset all metrics to 0
 
     def toggle_recording_mode(self):
@@ -463,7 +471,8 @@ class MainWindow(ctk.CTk):
 
             # Only send to WebSocket if enabled
             if self.ws_toggle.get() and self.ws_client.connected:
-                await self.ws_client.send_transcript(result)
+                preferred_name = self.name_entry.get()
+                await self.ws_client.send_transcript(result, preferred_name)
         except Exception as e:
             print(f"Error handling transcription: {e}")
 

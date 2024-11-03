@@ -4,7 +4,7 @@
     "ws_port": "3001",
     "push_to_talk_key": "f5",
     "audio_device": "Microphone (2- BEACN Mic) (MME)",
-    "ws_enabled": false,
+    "ws_enabled": true,
     "bits_hotkey": "f1",
     "follows_hotkey": "f2",
     "subs_hotkey": "f3",

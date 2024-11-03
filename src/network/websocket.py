@@ -11,7 +11,9 @@ class WebSocketClient:
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         self.connected = False
         self.message_handler: Optional[Callable] = None
+        self.status_handler: Optional[Callable] = None  # Status handler for UI
         self.reconnect_interval = 5  # seconds
+        self.metrics_task = None  # Initialize metrics_task
 
     async def connect(self):
         """Connect to WebSocket server"""
@@ -20,6 +22,10 @@ class WebSocketClient:
                 self.websocket = await websockets.connect(self.uri)
                 self.connected = True
                 print(f"Connected to WebSocket server at {self.uri}")
+                
+                # Notify status handler of connection status change
+                if self.status_handler:
+                    asyncio.get_running_loop().call_soon_threadsafe(self.status_handler, self.connected)
                 
                 # Send initial connection message
                 await self.send_message({
@@ -37,6 +43,11 @@ class WebSocketClient:
             except Exception as e:
                 print(f"WebSocket connection error: {e}")
                 self.connected = False
+                
+                # Notify status handler of connection status change
+                if self.status_handler:
+                    asyncio.get_running_loop().call_soon_threadsafe(self.status_handler, self.connected)
+
                 if self.metrics_task:
                     self.metrics_task.cancel()
                     self.metrics_task = None
@@ -94,12 +105,12 @@ class WebSocketClient:
         """Set handler for incoming messages"""
         self.message_handler = handler
 
-    async def send_transcript(self, transcript: Dict):
+    async def send_transcript(self, transcript: Dict, preferred_name: str):
         """Send transcription result to server"""
         timestamp = datetime.now().isoformat()
         message = {
             'type': 'transcript',
-            'username': CONFIG['PREFERRED_NAME'],
+            'username': preferred_name,
             'content': transcript['text'],
             'timestamp': timestamp
         }
@@ -119,6 +130,18 @@ class WebSocketClient:
             await self.websocket.close()
             self.connected = False
             print("Disconnected from WebSocket server")
+
+            # Notify status handler of connection status change
+            if self.status_handler:
+                asyncio.get_running_loop().call_soon_threadsafe(self.status_handler, self.connected)
+
+    def set_message_handler(self, handler: Callable):
+        """Set handler for incoming messages"""
+        self.message_handler = handler
+
+    def set_status_handler(self, handler: Callable):
+        """Set handler for connection status updates"""
+        self.status_handler = handler
 
 async def test_websocket():
     """Test WebSocket functionality with hotkey manager"""
