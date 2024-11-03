@@ -3,6 +3,7 @@ import json
 import websockets
 from typing import Optional, Callable, Dict
 from src.config.settings import CONFIG
+from datetime import datetime
 
 class WebSocketClient:
     def __init__(self):
@@ -20,11 +21,15 @@ class WebSocketClient:
                 self.connected = True
                 print(f"Connected to WebSocket server at {self.uri}")
                 
-                # Send initial connection message with user ID
+                # Send initial connection message
                 await self.send_message({
                     'type': 'connect',
                     'user_id': CONFIG['DISCORD_USER_ID']
                 })
+                
+                # Start metrics update task
+                if self.metrics_task is None:
+                    self.metrics_task = asyncio.create_task(self.request_metrics_updates())
                 
                 # Start listening for messages
                 await self._listen()
@@ -32,8 +37,34 @@ class WebSocketClient:
             except Exception as e:
                 print(f"WebSocket connection error: {e}")
                 self.connected = False
+                if self.metrics_task:
+                    self.metrics_task.cancel()
+                    self.metrics_task = None
+                if self.message_handler:
+                    # Send empty metrics to reset counters
+                    await self.message_handler({
+                        'type': 'metrics_update',
+                        'metrics': {}
+                    })
                 print(f"Reconnecting in {self.reconnect_interval} seconds...")
                 await asyncio.sleep(self.reconnect_interval)
+
+    async def request_metrics_updates(self):
+        """Periodically request metrics updates"""
+        while True:
+            try:
+                if self.connected:
+                    await self.send_message({'type': 'request_metrics'})
+                await asyncio.sleep(5)  # Update every 5 seconds
+            except Exception as e:
+                print(f"Error requesting metrics: {e}")
+                if self.message_handler:
+                    # Send empty metrics on error
+                    await self.message_handler({
+                        'type': 'metrics_update',
+                        'metrics': {}
+                    })
+                await asyncio.sleep(1)
 
     async def _listen(self):
         """Listen for messages from the server"""
@@ -65,12 +96,20 @@ class WebSocketClient:
 
     async def send_transcript(self, transcript: Dict):
         """Send transcription result to server"""
+        timestamp = datetime.now().isoformat()
         message = {
             'type': 'transcript',
-            'user_id': CONFIG['DISCORD_USER_ID'],
+            'username': CONFIG['PREFERRED_NAME'],
             'content': transcript['text'],
-            'language': transcript['language'],
-            'segments': transcript['segments']
+            'timestamp': timestamp
+        }
+        await self.send_message(message)
+
+    async def send_action(self, action: Dict):
+        """Send action request to server"""
+        message = {
+            'type': action['type'],
+            'timestamp': action['timestamp']
         }
         await self.send_message(message)
 

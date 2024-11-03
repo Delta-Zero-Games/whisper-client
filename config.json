@@ -5,5 +5,8 @@
     "push_to_talk_key": "f5",
     "audio_device": "Microphone (2- BEACN Mic) (MME)",
     "ws_enabled": false,
-    "recording_mode": "push"
+    "bits_hotkey": "f1",
+    "follows_hotkey": "f2",
+    "subs_hotkey": "f3",
+    "gifts_hotkey": "f4"
 }

@@ -4,6 +4,7 @@ from typing import Callable, Optional
 from src.config.settings import CONFIG
 from src.audio.capture import AudioCapture
 from src.audio.processor import AudioProcessor
+from datetime import datetime
 
 class HotkeyManager:
     def __init__(self, processor: AudioProcessor, capture: AudioCapture):
@@ -11,8 +12,10 @@ class HotkeyManager:
         self.capture = capture
         self.push_to_talk_key = CONFIG['PUSH_TO_TALK_KEY']  # Initial default from CONFIG
         self.mode = 'push'  # Default to push-to-talk
+        self.action_hotkeys = {}
         self.is_recording = False
         self.callback: Optional[Callable] = None
+        self.action_callback: Optional[Callable] = None
         self.loop = None
         self._hooks_active = False  # Track if hooks are active
 
@@ -36,17 +39,47 @@ class HotkeyManager:
             self.stop()
             self.start(self.loop)
 
+    def set_action_callback(self, callback: Callable[[str], None]):
+        """Set callback for action hotkeys"""
+        self.action_callback = callback
+
+    def set_action_hotkeys(self, hotkeys: dict):
+        """Set action hotkeys"""
+        self.action_hotkeys = {k: v for k, v in hotkeys.items() if v}  # Only store non-empty hotkeys
+        if self._hooks_active and self.loop:
+            self.stop()
+            self.start(self.loop)
+
     def start(self, loop: asyncio.AbstractEventLoop):
-        """Start listening for hotkey"""
+        """Start listening for hotkeys"""
         self.loop = loop
         self.stop()  # Clear any existing hooks
-        if self.mode == 'push':
+        
+        # Set push-to-talk hook
+        if self.push_to_talk_key:
             keyboard.on_press_key(self.push_to_talk_key, self._on_key_press)
             keyboard.on_release_key(self.push_to_talk_key, self._on_key_release)
-        elif self.mode == 'toggle':
-            keyboard.on_press_key(self.push_to_talk_key, self._on_key_press)
+            print(f"Listening for push-to-talk key: {self.push_to_talk_key}")
+        
+        # Set action hotkey hooks
+        for action, key in self.action_hotkeys.items():
+            if key:
+                keyboard.on_press_key(key, lambda e, a=action: self._on_action_key(a))
+                print(f"Listening for {action} key: {key}")
+        
         self._hooks_active = True
-        print(f"Listening for push-to-talk key: {self.push_to_talk_key} in {self.mode} mode")
+
+    def _on_action_key(self, action: str):
+        """Handle action key press"""
+        if self.action_callback and self.loop and self.loop.is_running():
+            timestamp = datetime.now().isoformat()
+            asyncio.run_coroutine_threadsafe(
+                self.action_callback({
+                    'type': action,
+                    'timestamp': timestamp
+                }), 
+                self.loop
+            )
 
     def stop(self):
         """Stop listening for hotkey"""

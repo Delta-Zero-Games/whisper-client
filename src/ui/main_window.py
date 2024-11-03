@@ -22,7 +22,7 @@ class MainWindow(ctk.CTk):
 
         # Setup window
         self.title("Whisper Client")
-        self.geometry("800x600")
+        self.geometry("600x750")
 
         # Set custom icon using .ico file
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -40,6 +40,12 @@ class MainWindow(ctk.CTk):
 
         # Set initial hotkey
         self.hotkey_manager.push_to_talk_key = self.config.get('push_to_talk_key', 'alt')
+        self.hotkey_manager.set_action_hotkeys({
+            'bits': self.config.get('bits_hotkey'),
+            'follows': self.config.get('follows_hotkey'),
+            'subs': self.config.get('subs_hotkey'),
+            'gifts': self.config.get('gifts_hotkey')
+        })
 
         # Load devices
         self.available_devices = self.capture.list_input_devices()
@@ -48,6 +54,7 @@ class MainWindow(ctk.CTk):
         self.create_settings_frame()
         self.create_status_frame()
         self.create_transcript_frame()
+        self.create_status_bar()
 
         self.update_device_menu()
 
@@ -57,6 +64,7 @@ class MainWindow(ctk.CTk):
 
         # Setup callbacks
         self.hotkey_manager.set_transcription_callback(self.on_transcription)
+        self.hotkey_manager.set_action_callback(self.on_action)
         self.ws_client.set_message_handler(self.on_server_message)
 
         # Assign callbacks for recording status updates
@@ -76,6 +84,51 @@ class MainWindow(ctk.CTk):
             self.recording_mode_switch.deselect()
             self.hotkey_manager.set_mode('push')
 
+    def create_status_bar(self):
+        """Create the status bar section"""
+        status_bar = ctk.CTkFrame(self, fg_color=self.default_fg_color)
+        status_bar.pack(fill="x", side="bottom", padx=10, pady=5)
+
+        # Configure grid columns for even spacing
+        for i in range(4):
+            status_bar.grid_columnconfigure(i, weight=1)
+
+        # Create labels for each metric with exact names
+        metrics = [
+            ('TTS Queue:', 'tts_in_queue'),
+            ('New Followers:', 'new_followers_count'),
+            ('New Subscribers:', 'new_subs_count'),
+            ('New Givers:', 'new_giver_count')
+        ]
+
+        self.metric_labels = {}
+        
+        for i, (label_text, key) in enumerate(metrics):
+            frame = ctk.CTkFrame(status_bar, fg_color="transparent")
+            frame.grid(row=0, column=i, padx=5, sticky="ew")
+            
+            ctk.CTkLabel(frame, text=label_text).pack(side="left", padx=2)
+            count_label = ctk.CTkLabel(frame, text="0")
+            count_label.pack(side="left", padx=2)
+            
+            self.metric_labels[key] = count_label
+
+    def update_metrics(self, metrics: dict):
+        """Update the metrics display"""
+        # If no metrics provided, set all to 0 (disconnected state)
+        if not metrics:
+            metrics = {
+                'tts_in_queue': 0,
+                'new_followers_count': 0,
+                'new_subs_count': 0,
+                'new_giver_count': 0
+            }
+        
+        # Update each metric, defaulting to 0 if not provided
+        for key in self.metric_labels:
+            value = metrics.get(key, 0)
+            self.metric_labels[key].configure(text=str(value))
+
     def toggle_websocket(self):
         """Toggle WebSocket connection"""
         if self.ws_toggle.get():
@@ -88,8 +141,9 @@ class MainWindow(ctk.CTk):
             asyncio.run_coroutine_threadsafe(self.ws_client.disconnect(), self.loop)
             self.ip_entry.configure(state="disabled")
             self.port_entry.configure(state="disabled")
-            # Update the status indicator
+            # Update the status indicator and reset metrics
             self.ws_status.configure(text_color="red")
+            self.update_metrics({})  # Reset all metrics to 0
 
     def toggle_recording_mode(self):
         """Toggle between push-to-talk and toggle-to-talk modes"""
@@ -145,6 +199,45 @@ class MainWindow(ctk.CTk):
         self.port_entry = ctk.CTkEntry(ip_frame, placeholder_text="Port", width=100)
         self.port_entry.pack(side="right", padx=2)
         self.port_entry.insert(0, self.config.get('ws_port', '3001'))
+
+        # Twitch Action Hotkeys
+        ctk.CTkLabel(settings_frame, text="Twitch Action Hotkeys:").pack(anchor="w", padx=5)
+
+        # Button row
+        hotkey_buttons_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
+        hotkey_buttons_frame.pack(fill="x", padx=2, pady=2)
+
+        # Entry row
+        hotkey_entries_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
+        hotkey_entries_frame.pack(fill="x", padx=2, pady=2)
+
+        # Configure grid columns for even spacing
+        for i in range(4):
+            hotkey_buttons_frame.grid_columnconfigure(i, weight=1)
+            hotkey_entries_frame.grid_columnconfigure(i, weight=1)
+
+        # Create hotkey entries and buttons
+        self.action_hotkeys = {}
+        for i, action in enumerate(['Bits', 'Follows', 'Subs', 'Gifts']):
+            # Button
+            btn = ctk.CTkButton(
+                hotkey_buttons_frame,
+                text=f"Set {action} Key",
+                command=lambda a=action: self.set_action_hotkey(a)
+            )
+            btn.grid(row=0, column=i, padx=2)
+            
+            # Entry
+            entry = ctk.CTkEntry(hotkey_entries_frame)
+            entry.grid(row=0, column=i, padx=2, sticky="ew")
+            entry.insert(0, self.config.get(f'{action.lower()}_hotkey', ''))
+            entry.configure(state="disabled")
+            
+            self.action_hotkeys[action] = {
+                'button': btn,
+                'entry': entry,
+                'key': self.config.get(f'{action.lower()}_hotkey', '')
+            }
 
         # Push to talk key
         ctk.CTkLabel(settings_frame, text="Push to Talk Key:").pack(anchor="w", padx=5)
@@ -274,35 +367,56 @@ class MainWindow(ctk.CTk):
             'ws_port': self.port_entry.get(),
             'push_to_talk_key': self.hotkey_entry.get(),
             'audio_device': self.device_menu.get(),
-            'ws_enabled': self.ws_toggle.get(),
-            'recording_mode': 'toggle' if self.recording_mode_switch.get() else 'push'
+            'ws_enabled': self.ws_toggle.get()
         }
-
+        
+        # Add action hotkeys to config
+        for action, data in self.action_hotkeys.items():
+            config[f'{action.lower()}_hotkey'] = data['entry'].get()
+        
         try:
             with open(self.config_file, 'w') as f:
                 json.dump(config, f, indent=4)
-
+                
             # Update device
             if config['audio_device'] in self.device_map:
                 device_id = self.device_map[config['audio_device']]
                 self.capture.set_device(device_id)
-
-            # Update hotkey
+                
+            # Update hotkeys
             self.hotkey_manager.set_hotkey(config['push_to_talk_key'])
-            self.hotkey_manager.stop()
-            self.hotkey_manager.start(self.loop)
-
-            # Update recording mode
-            self.hotkey_manager.set_mode(config['recording_mode'])
-
+            self.hotkey_manager.set_action_hotkeys({
+                'bits': config.get('bits_hotkey'),
+                'follows': config.get('follows_hotkey'),
+                'subs': config.get('subs_hotkey'),
+                'gifts': config.get('gifts_hotkey')
+            })
+            
             # Update WebSocket
             if config['ws_enabled']:
                 self.restart_websocket()
             else:
                 asyncio.run_coroutine_threadsafe(self.ws_client.disconnect(), self.loop)
-
+                
         except Exception as e:
             print(f"Error saving config: {e}")
+
+    def set_action_hotkey(self, action):
+        """Set hotkey for specific action"""
+        self.action_hotkeys[action]['button'].configure(text=f"Press any key...")
+        self.action_hotkeys[action]['entry'].configure(state="normal")
+        self.action_hotkeys[action]['entry'].delete(0, 'end')
+        
+        def on_key(event):
+            if event.name != 'escape':
+                self.action_hotkeys[action]['entry'].delete(0, 'end')
+                self.action_hotkeys[action]['entry'].insert(0, event.name)
+                self.action_hotkeys[action]['entry'].configure(state="disabled")
+                self.action_hotkeys[action]['button'].configure(text=f"Set {action} Key")
+                self.action_hotkeys[action]['key'] = event.name
+                keyboard.unhook(on_key)
+        
+        keyboard.hook(on_key)
 
     def set_hotkey(self):
         """Set push to talk key"""
@@ -355,8 +469,31 @@ class MainWindow(ctk.CTk):
 
     async def on_server_message(self, message):
         """Handle messages from the server"""
-        self.transcript_text.insert('end', f"\n[Server]: {message}\n")
+        try:
+            if message.get('type') == 'metrics_update':
+                # Update metrics display
+                self.update_metrics(message.get('metrics', {}))
+            else:
+                # Regular message for transcript
+                self.transcript_text.insert('end', f"\n[Server]: {message}\n")
+                self.transcript_text.see('end')
+        except Exception as e:
+            print(f"Error handling server message: {e}")
+
+    async def on_action(self, action):
+        """Handle action hotkey press"""
+        action_names = {
+            'bits': 'TTS Queue',
+            'follows': 'New Followers',
+            'subs': 'New Subscribers',
+            'gifts': 'New Givers'
+        }
+        
+        self.transcript_text.insert('end', f"\n[System] Requesting {action_names[action['type']]}...\n")
         self.transcript_text.see('end')
+        
+        if self.ws_toggle.get():
+            await self.ws_client.send_action(action)
 
     # Callback methods for recording status
     def on_recording_start(self):
