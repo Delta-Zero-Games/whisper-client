@@ -11,35 +11,39 @@ class WebSocketClient:
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         self.connected = False
         self.message_handler: Optional[Callable] = None
-        self.status_handler: Optional[Callable] = None  # Status handler for UI
-        self.reconnect_interval = 5  # seconds
-        self.metrics_task = None  # Initialize metrics_task
+        self.status_handler: Optional[Callable] = None
+        self.reconnect_interval = 5
+        self.metrics_task = None
+        self.should_reconnect = False  # Add this flag
 
     async def connect(self):
         """Connect to WebSocket server"""
-        while True:
+        self.should_reconnect = True  # Set reconnect flag
+        
+        while self.should_reconnect:
             try:
-                self.websocket = await websockets.connect(self.uri)
-                self.connected = True
-                print(f"Connected to WebSocket server at {self.uri}")
-                
-                # Notify status handler of connection status change
-                if self.status_handler:
-                    asyncio.get_running_loop().call_soon_threadsafe(self.status_handler, self.connected)
-                
-                # Send initial connection message
-                await self.send_message({
-                    'type': 'connect',
-                    'user_id': CONFIG['DISCORD_USER_ID']
-                })
-                
-                # Start metrics update task
-                if self.metrics_task is None:
-                    self.metrics_task = asyncio.create_task(self.request_metrics_updates())
-                
-                # Start listening for messages
-                await self._listen()
-                
+                if not self.connected:
+                    self.websocket = await websockets.connect(self.uri)
+                    self.connected = True
+                    print(f"Connected to WebSocket server at {self.uri}")
+                    
+                    # Notify status handler of connection status change
+                    if self.status_handler:
+                        asyncio.get_running_loop().call_soon_threadsafe(self.status_handler, self.connected)
+                    
+                    # Send initial connection message
+                    await self.send_message({
+                        'type': 'connect',
+                        'user_id': CONFIG['DISCORD_USER_ID']
+                    })
+                    
+                    # Start metrics update task
+                    if self.metrics_task is None:
+                        self.metrics_task = asyncio.create_task(self.request_metrics_updates())
+                    
+                    # Start listening for messages
+                    await self._listen()
+                    
             except Exception as e:
                 print(f"WebSocket connection error: {e}")
                 self.connected = False
@@ -57,12 +61,28 @@ class WebSocketClient:
                         'type': 'metrics_update',
                         'metrics': {}
                     })
-                print(f"Reconnecting in {self.reconnect_interval} seconds...")
-                await asyncio.sleep(self.reconnect_interval)
+                
+                if self.should_reconnect:
+                    print(f"Reconnecting in {self.reconnect_interval} seconds...")
+                    await asyncio.sleep(self.reconnect_interval)
+                else:
+                    break  # Exit the loop if reconnection is disabled
+
+    async def disconnect(self):
+        """Disconnect from WebSocket server"""
+        self.should_reconnect = False  # Disable reconnection
+        if self.websocket:
+            await self.websocket.close()
+            self.connected = False
+            print("Disconnected from WebSocket server")
+
+            # Notify status handler of connection status change
+            if self.status_handler:
+                asyncio.get_running_loop().call_soon_threadsafe(self.status_handler, self.connected)
 
     async def request_metrics_updates(self):
         """Periodically request metrics updates"""
-        while True:
+        while self.should_reconnect:  # Use the same flag here
             try:
                 if self.connected:
                     await self.send_message({'type': 'request_metrics'})
@@ -123,17 +143,6 @@ class WebSocketClient:
             'timestamp': action['timestamp']
         }
         await self.send_message(message)
-
-    async def disconnect(self):
-        """Disconnect from WebSocket server"""
-        if self.websocket:
-            await self.websocket.close()
-            self.connected = False
-            print("Disconnected from WebSocket server")
-
-            # Notify status handler of connection status change
-            if self.status_handler:
-                asyncio.get_running_loop().call_soon_threadsafe(self.status_handler, self.connected)
 
     def set_message_handler(self, handler: Callable):
         """Set handler for incoming messages"""

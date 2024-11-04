@@ -18,7 +18,11 @@ class MainWindow(ctk.CTk):
         # Initialize configuration
         self.config_file = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'config.json')
+        self.names_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'user_names.json')
+        
         self.config = self.load_config()
+        self.user_names = self.load_user_names()
 
         # Setup window
         self.title("Whisper Client")
@@ -45,7 +49,7 @@ class MainWindow(ctk.CTk):
         # Set initial hotkey
         self.hotkey_manager.push_to_talk_key = self.config.get('push_to_talk_key', 'alt')
         self.hotkey_manager.set_action_hotkeys({
-            'bits': self.config.get('bits_hotkey'),
+            'tts': self.config.get('tts_hotkey'),
             'follows': self.config.get('follows_hotkey'),
             'subs': self.config.get('subs_hotkey'),
             'gifts': self.config.get('gifts_hotkey')
@@ -137,7 +141,7 @@ class MainWindow(ctk.CTk):
         color = "green" if connected else "red"
         self.after(0, self.update_status_indicator, self.ws_status, color)
 
-    def toggle_websocket(self):
+    async def toggle_websocket(self):
         """Toggle WebSocket connection."""
         if self.ws_toggle.get():
             # Enable WebSocket
@@ -162,6 +166,23 @@ class MainWindow(ctk.CTk):
             self.hotkey_manager.set_mode('push')
             print("Switched to Push-to-Talk mode")
 
+    def load_user_names(self) -> list:
+        """Load user names from file"""
+        try:
+            if os.path.exists(self.names_file):
+                with open(self.names_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get('names', ['Default'])
+            else:
+                # Create default names file if it doesn't exist
+                default_names = {'names': ['Default']}
+                with open(self.names_file, 'w') as f:
+                    json.dump(default_names, f, indent=4)
+                return default_names['names']
+        except Exception as e:
+            print(f"Error loading user names: {e}")
+            return ['Default']
+
     def create_settings_frame(self):
         """Create the settings section"""
         settings_frame = ctk.CTkFrame(self, fg_color=self.default_fg_color)
@@ -172,11 +193,20 @@ class MainWindow(ctk.CTk):
         self.device_menu = ctk.CTkOptionMenu(settings_frame, values=["Loading..."])
         self.device_menu.pack(fill="x", padx=5, pady=2)
 
-        # Username
-        ctk.CTkLabel(settings_frame, text="Preferred Name:").pack(anchor="w", padx=5)
-        self.name_entry = ctk.CTkEntry(settings_frame)
-        self.name_entry.pack(fill="x", padx=5, pady=2)
-        self.name_entry.insert(0, self.config.get('preferred_name', ''))
+        # User selection (replacing name entry with dropdown)
+        ctk.CTkLabel(settings_frame, text="User:").pack(anchor="w", padx=5)
+        self.user_menu = ctk.CTkOptionMenu(
+            settings_frame,
+            values=self.user_names
+        )
+        self.user_menu.pack(fill="x", padx=5, pady=2)
+
+        # Set initial user selection if saved in config
+        saved_name = self.config.get('preferred_name')
+        if saved_name in self.user_names:
+            self.user_menu.set(saved_name)
+        else:
+            self.user_menu.set(self.user_names[0])
 
         # WebSocket settings
         ws_frame = ctk.CTkFrame(settings_frame, fg_color=self.default_fg_color)
@@ -226,7 +256,7 @@ class MainWindow(ctk.CTk):
 
         # Create hotkey entries and buttons
         self.action_hotkeys = {}
-        for i, action in enumerate(['Bits', 'Follows', 'Subs', 'Gifts']):
+        for i, action in enumerate(['TTS', 'Follows', 'Subs', 'Gifts']):
             # Button
             btn = ctk.CTkButton(
                 hotkey_buttons_frame,
@@ -312,26 +342,45 @@ class MainWindow(ctk.CTk):
         # WebSocket status
         ws_status_frame = ctk.CTkFrame(indicators_frame, fg_color="transparent")
         ws_status_frame.pack(side="left", padx=5)
-
-        ctk.CTkLabel(ws_status_frame, text="WebSocket:").pack(side="left", padx=2)
-        self.ws_status = ctk.CTkLabel(ws_status_frame, text="●", text_color="red")
+        ctk.CTkLabel(ws_status_frame, text="WebSocket:").pack(side="left", padx=5)
+        self.ws_status = ctk.CTkLabel(ws_status_frame, text="⬤", text_color="red")
         self.ws_status.pack(side="left")
 
         # Recording status
         rec_status_frame = ctk.CTkFrame(indicators_frame, fg_color="transparent")
         rec_status_frame.pack(side="left", padx=5)
-
-        ctk.CTkLabel(rec_status_frame, text="Recording:").pack(side="left", padx=2)
-        self.rec_status = ctk.CTkLabel(rec_status_frame, text="●", text_color="red")
+        ctk.CTkLabel(rec_status_frame, text="Recording:").pack(side="left", padx=5)
+        self.rec_status = ctk.CTkLabel(rec_status_frame, text="⬤", text_color="red")
         self.rec_status.pack(side="left")
 
         # Processing status
         proc_status_frame = ctk.CTkFrame(indicators_frame, fg_color="transparent")
         proc_status_frame.pack(side="left", padx=5)
-
-        ctk.CTkLabel(proc_status_frame, text="Processing:").pack(side="left", padx=2)
-        self.proc_status = ctk.CTkLabel(proc_status_frame, text="●", text_color="red")
+        ctk.CTkLabel(proc_status_frame, text="Processing:").pack(side="left", padx=5)
+        self.proc_status = ctk.CTkLabel(proc_status_frame, text="⬤", text_color="red")
         self.proc_status.pack(side="left")
+
+        # Bot status
+        bot_status_frame = ctk.CTkFrame(indicators_frame, fg_color="transparent")
+        bot_status_frame.pack(fill="x", expand=True, side="left", padx=2)  # Changed to fill and expand
+        
+        # Status indicators on the left
+        status_container = ctk.CTkFrame(bot_status_frame, fg_color="transparent")
+        status_container.pack(side="left")
+        
+        ctk.CTkLabel(status_container, text="Bot:").pack(side="left", padx=5)
+        self.bot_status = ctk.CTkLabel(status_container, text="⬤", text_color="red")
+        self.bot_status.pack(side="left")
+
+        # Bot control button on the right
+        self.bot_button = ctk.CTkButton(
+            bot_status_frame,
+            text="Connect Bot",
+            command=self.toggle_bot,
+            fg_color="green",
+            width=100
+        )
+        self.bot_button.pack(side="right", padx=0)
 
     def create_transcript_frame(self):
         """Create the transcript section"""
@@ -370,7 +419,7 @@ class MainWindow(ctk.CTk):
     def save_settings(self):
         """Save settings to config file"""
         config = {
-            'preferred_name': self.name_entry.get(),
+            'preferred_name': self.user_menu.get(),
             'ws_ip': self.ip_entry.get(),
             'ws_port': self.port_entry.get(),
             'push_to_talk_key': self.hotkey_entry.get(),
@@ -394,7 +443,7 @@ class MainWindow(ctk.CTk):
             # Update hotkeys
             self.hotkey_manager.set_hotkey(config['push_to_talk_key'])
             self.hotkey_manager.set_action_hotkeys({
-                'bits': config.get('bits_hotkey'),
+                'tts': config.get('tts_hotkey'),
                 'follows': config.get('follows_hotkey'),
                 'subs': config.get('subs_hotkey'),
                 'gifts': config.get('gifts_hotkey')
@@ -466,22 +515,72 @@ class MainWindow(ctk.CTk):
         """Handle transcription results"""
         try:
             # Update transcript text box
-            self.transcript_text.insert('end', f"\n[{self.name_entry.get()}]: {result['text']}\n")
+            self.transcript_text.insert('end', f"\n[{self.user_menu.get()}]: {result['text']}\n")
             self.transcript_text.see('end')
 
             # Only send to WebSocket if enabled
             if self.ws_toggle.get() and self.ws_client.connected:
-                preferred_name = self.name_entry.get()
+                preferred_name = self.user_menu.get()
                 await self.ws_client.send_transcript(result, preferred_name)
         except Exception as e:
             print(f"Error handling transcription: {e}")
 
+    def toggle_bot(self):
+        """Toggle bot connection state"""
+        try:
+            if self.bot_button.cget("text") == "Connect Bot":
+                # Request bot to join
+                asyncio.run_coroutine_threadsafe(
+                    self.ws_client.send_message({
+                        'type': 'bot_control',
+                        'action': 'connect'
+                    }),
+                    self.loop
+                )
+            else:
+                # Request bot to disconnect
+                asyncio.run_coroutine_threadsafe(
+                    self.ws_client.send_message({
+                        'type': 'bot_control',
+                        'action': 'disconnect'
+                    }),
+                    self.loop
+                )
+        except Exception as e:
+            print(f"Error toggling bot: {e}")
+
+    def update_bot_status(self, is_connected: bool):
+        """Update bot status in UI"""
+        # Update status indicator
+        color = "green" if is_connected else "red"
+        self.bot_status.configure(text_color=color)
+        
+        # Update button
+        if is_connected:
+            self.bot_button.configure(
+                text="Disconnect Bot",
+                fg_color="red"
+            )
+        else:
+            self.bot_button.configure(
+                text="Connect Bot",
+                fg_color="green"
+            )
+
     async def on_server_message(self, message):
         """Handle messages from the server"""
         try:
-            if message.get('type') == 'metrics_update':
+            message_type = message.get('type')
+            
+            if message_type == 'metrics_update':
                 # Update metrics display
                 self.update_metrics(message.get('metrics', {}))
+            elif message_type == 'bot_status':
+                # Update bot status
+                self.loop.call_soon_threadsafe(
+                    self.update_bot_status,
+                    message.get('connected', False)
+                )
             else:
                 # Regular message for transcript
                 self.transcript_text.insert('end', f"\n[Server]: {message}\n")
@@ -492,7 +591,7 @@ class MainWindow(ctk.CTk):
     async def on_action(self, action):
         """Handle action hotkey press"""
         action_names = {
-            'bits': 'TTS Queue',
+            'tts': 'TTS Queue',
             'follows': 'New Followers',
             'subs': 'New Subscribers',
             'gifts': 'New Givers'
