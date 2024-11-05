@@ -115,3 +115,38 @@ Thumbs.db
 
 # Secret files
 *.env
+
+# Inno Setup Files
+*.iss
+Output/
+WhisperClient-Setup.exe
+build.py
+*.bin
+dependency_analysis*
+
+# PyInstaller
+*.manifest
+*.spec
+*.pyc
+/build/
+/dist/
+
+# Temporary files
+*.bak
+*.tmp
+~$*
+
+# Application specific
+config.json
+user_names.json
+
+# Windows Installer files
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.exe
+
+# Windows shortcuts
+*.lnk
